@@ -19,29 +19,65 @@ class Grafana(Plugin, IndependentPlugin):
 
     packages = ('grafana',)
 
+    def _is_snap_installed(self):
+        grafana_pkg = self.policy.package_manager.pkg_by_name('grafana')
+        if grafana_pkg:
+            return grafana_pkg['pkg_manager'] == 'snap'
+        return False
+
     def setup(self):
-        if self.get_option("all_logs"):
-            self.add_copy_spec("/var/log/grafana/*.log*")
+        self._is_snap = self._is_snap_installed()
+        if self._is_snap:
+            self.add_cmd_output([
+                'snap info grafana',
+                'grafana.grafana-cli plugins ls',
+                'grafana.grafana-cli plugins list-remote'
+            ])
+            if self.get_option("all_logs"):
+                self.add_copy_spec([
+                    "/var/snap/grafana/common/data/log/grafana.log*",
+                ])
+            else:
+                self.add_copy_spec([
+                    "/var/snap/grafana/common/data/log/grafana.log"
+                ])
+            self.add_copy_spec("/var/snap/grafana/current/conf/grafana.ini")
         else:
-            self.add_copy_spec("/var/log/grafana/*.log")
+            if self.get_option("all_logs"):
+                self.add_copy_spec("/var/log/grafana/*.log*")
+            else:
+                self.add_copy_spec("/var/log/grafana/*.log")
 
-        self.add_cmd_output([
-            "grafana-cli plugins ls",
-            "grafana-cli plugins list-remote",
-            "grafana-cli -v",
-            "grafana-server -v",
-        ])
+            self.add_cmd_output([
+                "grafana-cli plugins ls",
+                "grafana-cli plugins list-remote",
+                "grafana-cli -v",
+                "grafana-server -v",
+            ])
 
-        self.add_copy_spec([
-            "/etc/grafana/",
-            "/etc/sysconfig/grafana-server",
-        ])
+            self.add_copy_spec([
+                "/etc/grafana/",
+                "/etc/sysconfig/grafana-server",
+            ])
 
     def postproc(self):
         protect_keys = [
-            "admin_password", "secret_key"
+            "admin_password",
+            "secret_key",
+            "password",
+            "client_secret"
         ]
-
-        regexp = r"((?m)^\s*(%s)\s*=\s*)(.*)" % "|".join(protect_keys)
-        self.do_path_regex_sub("/etc/grafana/grafana.ini",
-                               regexp, r"\1*********")
+        if self._is_snap:
+            regexp = r"((?m)^\s*(%s)\s*=\s*)(.*)" % "|".join(protect_keys)
+            self.do_path_regex_sub(
+                "/var/snap/grafana/current/conf/grafana.ini",
+                regexp,
+                r"\1*********"
+            )
+        else:
+            regexp = r"((?m)^\s*(%s)\s*=\s*)(.*)" % "|".join(protect_keys)
+            self.do_path_regex_sub(
+                "/etc/grafana/grafana.ini",
+                regexp,
+                r"\1*********"
+            )
