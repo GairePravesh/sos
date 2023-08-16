@@ -28,38 +28,32 @@ class Grafana(Plugin, IndependentPlugin):
     def setup(self):
         self._is_snap = self._is_snap_installed()
         if self._is_snap:
-            self.add_cmd_output([
-                'snap info grafana',
-                'grafana.grafana-cli plugins ls',
-                'grafana.grafana-cli plugins list-remote'
-            ])
-            if self.get_option("all_logs"):
-                self.add_copy_spec([
-                    "/var/snap/grafana/common/data/log/grafana.log*",
-                ])
-            else:
-                self.add_copy_spec([
-                    "/var/snap/grafana/common/data/log/grafana.log"
-                ])
-            self.add_copy_spec("/var/snap/grafana/current/conf/grafana.ini")
+            grafana_cli = "grafana.grafana-cli"
+            log_path = "/var/snap/grafana/common/data/log/"
+            config_path = "/var/snap/grafana/current/conf/grafana.ini"
+
         else:
-            if self.get_option("all_logs"):
-                self.add_copy_spec("/var/log/grafana/*.log*")
-            else:
-                self.add_copy_spec("/var/log/grafana/*.log")
+            grafana_cli = "grafana-cli"
+            log_path = "/var/log/grafana/"
+            config_path = "/etc/grafana/"
 
-            self.add_cmd_output([
-                "grafana-cli plugins ls",
-                "grafana-cli plugins list-remote",
-                "grafana-cli -v",
-                "grafana-server -v",
-            ])
+        add_cmds = [
+            f'{grafana_cli} plugins ls',
+            f'{grafana_cli} plugins list-remote',
+            'snap info grafana' if self._is_snap else None,
+            f'{grafana_cli} -v' if not self._is_snap else None,
+            'grafana-server -v' if not self._is_snap else None
+        ]
+        self.add_cmd_output(list(filter(None, add_cmds)))
 
-            self.add_copy_spec([
-                "/etc/grafana/",
-                "/etc/sysconfig/grafana-server",
-            ])
+        log_file_pattern = "*.log*" if self.get_option("all_logs") else "*.log"
+        self.add_copy_spec(log_path + log_file_pattern)
 
+        self.add_copy_spec([
+            config_path,
+            "/etc/sysconfig/grafana-server" if not self._is_snap else None
+        ])
+                
     def postproc(self):
         protect_keys = [
             "admin_password",
@@ -67,17 +61,6 @@ class Grafana(Plugin, IndependentPlugin):
             "password",
             "client_secret"
         ]
-        if self._is_snap:
-            regexp = r"((?m)^\s*(%s)\s*=\s*)(.*)" % "|".join(protect_keys)
-            self.do_path_regex_sub(
-                "/var/snap/grafana/current/conf/grafana.ini",
-                regexp,
-                r"\1*********"
-            )
-        else:
-            regexp = r"((?m)^\s*(%s)\s*=\s*)(.*)" % "|".join(protect_keys)
-            self.do_path_regex_sub(
-                "/etc/grafana/grafana.ini",
-                regexp,
-                r"\1*********"
-            )
+        inifile = "/var/snap/grafana/current/conf/grafana.ini" if self._is_snap else "/etc/grafana/grafana.ini"
+        regexp = r"((?m)^\s*(%s)\s*=\s*)(.*)" % "|".join(protect_keys)
+        self.do_path_regex_sub(inifile,regexp,r"\1*********")
